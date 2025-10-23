@@ -1,0 +1,5 @@
+{
+  "name": "Copy of Plugin Pitch",
+  "description": "A simple and responsive web application for managing a real-time voting event called 'Plugin Pitch'. Users can register, vote for projects, and see the winner announced in real-time. An admin panel is available for event management.",
+  "requestFramePermissions": []
+}
