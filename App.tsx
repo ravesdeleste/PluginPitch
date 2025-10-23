@@ -38,7 +38,6 @@ const App: React.FC = () => {
   const [userVoteInfo, setUserVoteInfo] = useState<UserVoteInfo | null>(null);
   const [winnerData, setWinnerData] = useState<Winner | null>(null);
   const [isWinnerModalOpen, setIsWinnerModalOpen] = useState(false);
-  const [isSubmittingVote, setIsSubmittingVote] = useState(false);
 
 
   useEffect(() => {
@@ -121,8 +120,8 @@ const App: React.FC = () => {
   };
 
   const handleVote = async (projectId: string) => {
-    if (userVoteInfo && !isSubmittingVote) {
-      setIsSubmittingVote(true);
+    if (userVoteInfo) {
+      setAppState(AppState.LOADING);
       try {
         const userId = getLocalUserId();
         const voteData = {
@@ -139,8 +138,7 @@ const App: React.FC = () => {
       } catch(error) {
         console.error("Error submitting vote:", error);
         alert("Hubo un error al registrar tu voto. Por favor, inténtalo de nuevo. Asegúrate de que la configuración de Firebase sea correcta.");
-      } finally {
-        setIsSubmittingVote(false);
+        setAppState(AppState.VOTING);
       }
     }
   };
@@ -166,7 +164,7 @@ const App: React.FC = () => {
       case AppState.REGISTRATION:
         return <RegistrationForm onRegister={handleRegister} />;
       case AppState.VOTING:
-        return <VotingScreen projects={projects} onVote={handleVote} isLoading={projects.length === 0} isSubmitting={isSubmittingVote} />;
+        return <VotingScreen projects={projects} onVote={handleVote} isLoading={projects.length === 0} />;
       case AppState.THANK_YOU:
         return <ThankYouScreen />;
       case AppState.VOTED:
