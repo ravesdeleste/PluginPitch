@@ -7,7 +7,17 @@ interface WelcomeScreenProps {
 const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onVoteClick }) => {
   return (
     <div className="w-full max-w-md p-8 text-center bg-slate-800 rounded-xl shadow-lg animate-fade-in">
-      <h1 className="text-5xl font-bold text-white mb-6">Bienvenido a Plugin Pitch</h1>
+      <div className="flex flex-col items-center gap-4 mb-6">
+        <img
+          src="/images/logo-plugin.jpeg"
+          alt="Plugin Pitch Logo"
+          className="w-20 h-20 rounded-2xl shadow-lg object-cover"
+        />
+        <div>
+          <h1 className="text-4xl font-bold text-white">Plugin Pitch</h1>
+          <p className="text-sm text-slate-400 mt-1">Plataforma de Votación</p>
+        </div>
+      </div>
       <p className="text-lg text-gray-300 mb-8">
         Tu voto es fundamental para decidir el futuro de la innovación.
       </p>

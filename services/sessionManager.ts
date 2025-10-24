@@ -39,10 +39,13 @@ export interface AuthResult {
 }
 
 /**
- * Send email verification link to user
+ * Send email verification code via Brevo (Cloud Function)
  */
 export async function sendEmailVerificationLink(email: string, userName: string, isJury: boolean): Promise<AuthResult> {
   try {
+    // Import emailService to avoid circular dependencies
+    const { sendVerificationEmailViaBrevo } = await import('./emailService');
+
     // Validate inputs
     if (!email || !isValidEmail(email)) {
       return { success: false, message: 'Correo electrónico inválido' };
@@ -52,41 +55,21 @@ export async function sendEmailVerificationLink(email: string, userName: string,
       return { success: false, message: 'El nombre es requerido' };
     }
 
-    // Check if user has already voted today
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    // Call Cloud Function to send email via Brevo
+    const result = await sendVerificationEmailViaBrevo(email, userName, isJury);
 
-    const votesQuery = query(
-      collection(db, 'votes'),
-      where('userEmail', '==', email),
-      where('timestamp', '>=', Timestamp.fromDate(today))
-    );
-
-    const existingVotes = await getDocs(votesQuery);
-    if (!existingVotes.empty) {
-      return {
-        success: false,
-        message: 'Ya has votado hoy. Puedes votar nuevamente mañana.',
-      };
+    if (!result.success) {
+      return result;
     }
 
-    // Store pending verification data in sessionStorage
+    // Store pending verification data in localStorage (persists across page reloads)
     const pendingAuth = {
       email,
       userName,
       isJury,
       timestamp: Date.now(),
     };
-    sessionStorage.setItem('pluginpitch_pending_auth', JSON.stringify(pendingAuth));
-
-    // Configure email link settings
-    const actionCodeSettings = {
-      url: `${window.location.origin}?mode=verifyEmail&email=${encodeURIComponent(email)}`,
-      handleCodeInApp: true,
-    };
-
-    // Send verification link
-    await sendSignInLinkToEmail(auth, email, actionCodeSettings);
+    localStorage.setItem('pluginpitch_pending_auth', JSON.stringify(pendingAuth));
 
     return {
       success: true,
@@ -94,14 +77,6 @@ export async function sendEmailVerificationLink(email: string, userName: string,
     };
   } catch (error: any) {
     console.error('Error sending verification link:', error);
-
-    // Handle specific Firebase errors
-    if (error.code === 'auth/invalid-email') {
-      return { success: false, message: 'Correo electrónico inválido' };
-    }
-    if (error.code === 'auth/too-many-requests') {
-      return { success: false, message: 'Demasiados intentos. Por favor intenta más tarde.' };
-    }
 
     return {
       success: false,
@@ -111,50 +86,49 @@ export async function sendEmailVerificationLink(email: string, userName: string,
 }
 
 /**
- * Verify email link and complete authentication
+ * Verify email code and complete authentication (uses Brevo code from email link)
+ * Called when user opens ?code=xxx&email=yyy from email
  */
-export async function verifyEmailLink(): Promise<AuthResult> {
+export async function verifyEmailCode(code: string, email: string): Promise<AuthResult> {
   try {
-    // Check if the URL contains the verification link
-    if (!isSignInWithEmailLink(auth, window.location.href)) {
-      return { success: false, message: 'Link de verificación inválido o expirado.' };
+    // Import emailService to avoid circular dependencies
+    const { verifyEmailCodeViaBrevo } = await import('./emailService');
+
+    if (!code || !email) {
+      return { success: false, message: 'Código o email inválido.' };
     }
 
-    // Get pending auth data
-    const pendingAuthStr = sessionStorage.getItem('pluginpitch_pending_auth');
-    if (!pendingAuthStr) {
-      return { success: false, message: 'Error: datos de verificación no encontrados.' };
+    // Call Cloud Function to verify code
+    const result = await verifyEmailCodeViaBrevo(code, email);
+
+    if (!result.success) {
+      return result;
     }
 
-    const pendingAuth = JSON.parse(pendingAuthStr);
-    const { email, userName, isJury } = pendingAuth;
-
-    // Sign in with the email link
-    const result = await signInWithEmailLink(auth, email, window.location.href);
-    const user = result.user;
+    const { userName, isJury } = result;
 
     // Create session data
-    const sessionId = user.uid;
+    const sessionId = `session_${Date.now()}_${Math.random().toString(36).substring(2)}`;
     const expiresAt = new Date();
     expiresAt.setHours(expiresAt.getHours() + 24); // 24-hour session
 
     const sessionData: SessionData = {
       sessionId,
       userEmail: email,
-      userName,
+      userName: userName || 'Usuario',
       role: isJury ? 'jury' : 'voter',
       weight: isJury ? 2 : 1,
       createdAt: new Date(),
       expiresAt,
-      isJury,
+      isJury: isJury || false,
     };
 
-    // Store session in sessionStorage
+    // Store session in sessionStorage (persists during active browser session)
     sessionStorage.setItem('pluginpitch_session', JSON.stringify(sessionData));
 
     // Store user data in Firestore for record-keeping
-    await setDoc(doc(collection(db, 'users'), user.uid), {
-      email: user.email,
+    await setDoc(doc(collection(db, 'users'), sessionId), {
+      email,
       name: userName,
       role: isJury ? 'jury' : 'voter',
       isJury,
@@ -162,8 +136,8 @@ export async function verifyEmailLink(): Promise<AuthResult> {
       lastVerifiedAt: Timestamp.now(),
     });
 
-    // Clear pending auth data
-    sessionStorage.removeItem('pluginpitch_pending_auth');
+    // Clear pending auth data from localStorage
+    localStorage.removeItem('pluginpitch_pending_auth');
 
     return {
       success: true,
@@ -171,18 +145,11 @@ export async function verifyEmailLink(): Promise<AuthResult> {
       sessionData,
     };
   } catch (error: any) {
-    console.error('Error verifying email link:', error);
-
-    if (error.code === 'auth/expired-action-code') {
-      return { success: false, message: 'El link de verificación ha expirado. Por favor intenta de nuevo.' };
-    }
-    if (error.code === 'auth/invalid-action-code') {
-      return { success: false, message: 'Link de verificación inválido. Por favor intenta de nuevo.' };
-    }
+    console.error('Error verifying email code:', error);
 
     return {
       success: false,
-      message: 'Error al verificar el email. Por favor intenta de nuevo.',
+      message: 'Error al verificar el código. Por favor intenta de nuevo.',
     };
   }
 }
@@ -322,11 +289,25 @@ export function hasActiveAdminSession(): boolean {
 }
 
 /**
- * Get stored vote info from previous session
+ * Get stored vote info from previous session (cached locally to reduce queries)
  */
 export async function getStoredVoteInfo(userEmail: string): Promise<{ projectId: string; isJury: boolean } | null> {
   try {
-    // Query for latest vote by this user today
+    // Check local cache first (avoid unnecessary queries)
+    const cacheKey = `vote_cache_${userEmail}`;
+    const cachedVote = sessionStorage.getItem(cacheKey);
+    const cacheTime = sessionStorage.getItem(`${cacheKey}_time`);
+
+    // If cache is recent (within 5 minutes), use it
+    if (cachedVote && cacheTime) {
+      const cacheAge = Date.now() - parseInt(cacheTime);
+      if (cacheAge < 5 * 60 * 1000) {
+        const cached = JSON.parse(cachedVote);
+        return cached.found ? cached.data : null;
+      }
+    }
+
+    // Query Firestore only if cache is stale
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
@@ -338,13 +319,24 @@ export async function getStoredVoteInfo(userEmail: string): Promise<{ projectId:
 
     const votes = await getDocs(votesQuery);
 
-    if (votes.empty) return null;
+    if (votes.empty) {
+      // Cache empty result
+      sessionStorage.setItem(cacheKey, JSON.stringify({ found: false }));
+      sessionStorage.setItem(`${cacheKey}_time`, Date.now().toString());
+      return null;
+    }
 
     const latestVote = votes.docs[0].data();
-    return {
+    const voteInfo = {
       projectId: latestVote.projectId,
       isJury: latestVote.weight === 2,
     };
+
+    // Cache the result
+    sessionStorage.setItem(cacheKey, JSON.stringify({ found: true, data: voteInfo }));
+    sessionStorage.setItem(`${cacheKey}_time`, Date.now().toString());
+
+    return voteInfo;
   } catch (error) {
     console.error('Error getting stored vote info:', error);
     return null;

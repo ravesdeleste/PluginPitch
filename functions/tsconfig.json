@@ -1,0 +1,15 @@
+{
+  "compilerOptions": {
+    "module": "esnext",
+    "noImplicitReturns": true,
+    "noImplicitAny": true,
+    "outDir": "lib",
+    "resolveJsonModule": true,
+    "sourceMap": true,
+    "strict": true,
+    "target": "ES2022",
+    "moduleResolution": "node"
+  },
+  "compileOnSave": true,
+  "include": ["src"]
+}

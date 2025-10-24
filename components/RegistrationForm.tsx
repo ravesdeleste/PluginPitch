@@ -37,7 +37,15 @@ const RegistrationForm: React.FC<RegistrationFormProps> = ({ onEmailSent }) => {
 
   return (
     <div className="w-full max-w-md p-8 space-y-6 bg-slate-800 rounded-xl shadow-lg">
-      <h1 className="text-4xl font-bold text-center text-white">Plugin Pitch</h1>
+      <div className="flex flex-col items-center gap-3 mb-4">
+        <img
+          src="/images/logo-plugin.jpeg"
+          alt="Plugin Pitch Logo"
+          className="w-14 h-14 rounded-lg shadow-md object-cover"
+        />
+        <h1 className="text-3xl font-bold text-center text-white">Plugin Pitch</h1>
+        <p className="text-xs text-slate-400 text-center">Plataforma de Votación</p>
+      </div>
       <form onSubmit={handleSubmit} className="space-y-6">
         <div>
           <label htmlFor="name" className="text-sm font-medium text-gray-300">

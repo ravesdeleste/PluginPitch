@@ -11,13 +11,14 @@ import Spinner from './components/Spinner';
 import WinnerModal from './components/WinnerModal';
 import ThankYouScreen from './components/ThankYouScreen';
 import WelcomeScreen from './components/WelcomeScreen';
+import Header from './components/Header';
 import {
   getCurrentSession,
   getCurrentAdminSession,
   clearSession,
   clearAdminSession,
   getStoredVoteInfo,
-  verifyEmailLink,
+  verifyEmailCode,
 } from './services/sessionManager';
 import EmailVerificationScreen from './components/EmailVerificationScreen';
 
@@ -46,65 +47,68 @@ const App: React.FC = () => {
   const [winnerData, setWinnerData] = useState<Winner | null>(null);
   const [isWinnerModalOpen, setIsWinnerModalOpen] = useState(false);
   const [pendingVerificationEmail, setPendingVerificationEmail] = useState<string | null>(null);
+  const [emailVerificationProcessed, setEmailVerificationProcessed] = useState(false);
 
-
+  // Handle email verification from Brevo link (runs once)
   useEffect(() => {
-    const checkUserStatus = async () => {
-      // Check if user is verifying email from link
-      const params = new URLSearchParams(window.location.search);
-      if (params.get('mode') === 'verifyEmail') {
+    // Check if URL contains code and email parameters from Brevo email
+    const params = new URLSearchParams(window.location.search);
+    const code = params.get('code');
+    const email = params.get('email');
+
+    if (code && email && !emailVerificationProcessed) {
+      setEmailVerificationProcessed(true);
+
+      (async () => {
         try {
-          const result = await verifyEmailLink();
+          const result = await verifyEmailCode(code, email);
+          // Clean URL immediately after verification attempt
+          window.history.replaceState({}, document.title, window.location.pathname);
+
           if (result.success && result.sessionData) {
-            // Email verified successfully, proceed to voting
             setUserVoteInfo({ projectId: '', isJury: result.sessionData.isJury });
             setAppState(AppState.VOTING);
-            return;
           } else {
-            // Verification failed, show error and go back to registration
             alert(result.message);
             setAppState(AppState.WELCOME);
-            return;
           }
         } catch (error) {
           console.error('Error verifying email:', error);
+          window.history.replaceState({}, document.title, window.location.pathname);
           alert('Error al verificar tu email. Por favor intenta de nuevo.');
           setAppState(AppState.WELCOME);
-          return;
         }
-      }
+      })();
+      return;
+    }
 
-      // Check if admin is logged in
+    // Normal status check (admin/user session)
+    (async () => {
       const adminSession = getCurrentAdminSession();
       if (adminSession) {
         setAppState(AppState.ADMIN_PANEL);
         return;
       }
 
-      // Check if regular user has active session
       const userSession = getCurrentSession();
       if (userSession) {
-        // Try to find stored vote info
         const storedVote = await getStoredVoteInfo(userSession.userEmail);
         if (storedVote) {
           setUserVoteInfo(storedVote);
           setAppState(AppState.VOTED);
-          return;
+        } else {
+          setAppState(AppState.VOTING);
         }
-
-        // User has session but no vote yet
-        setAppState(AppState.VOTING);
-        return;
+      } else {
+        setAppState(AppState.WELCOME);
       }
+    })();
+  }, [emailVerificationProcessed]);
 
-      // No active session, show welcome screen
-      setAppState(AppState.WELCOME);
-    };
-
-    checkUserStatus();
-  }, []);
-
+  // Load projects only when user is registered (avoid unnecessary queries)
   useEffect(() => {
+    if (appState === AppState.LOADING) return;
+
     const q = collection(db, 'projects');
     const unsubscribe = onSnapshot(q, (querySnapshot) => {
       const projectsData: Project[] = [];
@@ -114,21 +118,24 @@ const App: React.FC = () => {
       setProjects(projectsData);
     });
     return () => unsubscribe();
-  }, []);
+  }, [appState]);
 
+  // Load winner only when user has voted (avoid unnecessary queries)
   useEffect(() => {
+    if (appState !== AppState.VOTED && appState !== AppState.THANK_YOU) return;
+
     const winnerDocRef = doc(db, 'results', 'winner');
     const unsubscribe = onSnapshot(winnerDocRef, (docSnap) => {
-        if (docSnap.exists()) {
-            const data = docSnap.data() as Winner;
-            if(data.winnerId){
-                setWinnerData(data);
-                setIsWinnerModalOpen(true);
-            }
+      if (docSnap.exists()) {
+        const data = docSnap.data() as Winner;
+        if (data.winnerId) {
+          setWinnerData(data);
+          setIsWinnerModalOpen(true);
         }
+      }
     });
     return () => unsubscribe();
-  }, []);
+  }, [appState]);
   
   useEffect(() => {
     if (appState === AppState.THANK_YOU) {
@@ -193,9 +200,19 @@ const App: React.FC = () => {
     setAppState(AppState.ADMIN_PANEL);
   };
 
-  const handleAdminSignOut = () => {
-    clearAdminSession();
+  const handleLogout = async () => {
+    const isAdmin = getCurrentAdminSession();
+    const isVoter = getCurrentSession();
+
+    if (isAdmin) {
+      clearAdminSession();
+    }
+    if (isVoter) {
+      await clearSession();
+    }
+
     setAppState(AppState.WELCOME);
+    setUserVoteInfo(null);
   };
 
   const renderContent = () => {
@@ -224,7 +241,7 @@ const App: React.FC = () => {
       case AppState.ADMIN_LOGIN:
         return <AdminLogin onLogin={handleAdminLogin} />;
       case AppState.ADMIN_PANEL:
-        return <AdminPanel projects={projects} onSignOut={handleAdminSignOut} />;
+        return <AdminPanel projects={projects} onSignOut={handleLogout} />;
       default:
         return <Spinner />;
     }
@@ -233,21 +250,51 @@ const App: React.FC = () => {
   const winnerProject = projects.find(p => p.id === winnerData?.winnerId);
   const userVotedForWinner = userVoteInfo?.projectId === winnerData?.winnerId;
 
+  // Determine if header should be shown
+  const showHeader = [
+    AppState.VOTING,
+    AppState.VOTED,
+    AppState.THANK_YOU,
+    AppState.ADMIN_PANEL,
+  ].includes(appState);
+
+  // Get current user info for header
+  const currentUserSession = getCurrentSession();
+  const currentAdminSession = getCurrentAdminSession();
+
   return (
-    <div className="min-h-screen bg-slate-900 text-white flex flex-col items-center justify-center p-4 relative">
-      <main className="w-full flex-grow flex items-center justify-center">
+    <div className="min-h-screen bg-slate-900 text-white flex flex-col relative">
+      {showHeader && (
+        <Header
+          userName={currentAdminSession?.userName || currentUserSession?.userName}
+          isLoggedIn={showHeader}
+          onLogout={handleLogout}
+        />
+      )}
+
+      <main className="flex-grow flex items-center justify-center p-4">
         {renderContent()}
       </main>
-      <footer className="w-full text-center p-4 text-gray-500 text-sm">
-        <a href="#" onClick={(e) => { e.preventDefault(); setAppState(AppState.ADMIN_LOGIN); }} className="hover:text-blue-400 transition">
-          Admin Access
-        </a>
-        <p className="mt-1">Plugin Pitch</p>
-      </footer>
-      <WinnerModal 
-        isOpen={isWinnerModalOpen} 
-        winnerProject={winnerProject} 
-        userVotedForWinner={userVotedForWinner} 
+
+      {!showHeader && (
+        <footer className="w-full text-center p-4 text-gray-500 text-sm">
+          <a
+            href="#"
+            onClick={(e) => {
+              e.preventDefault();
+              setAppState(AppState.ADMIN_LOGIN);
+            }}
+            className="hover:text-blue-400 transition text-xs"
+          >
+            Admin
+          </a>
+        </footer>
+      )}
+
+      <WinnerModal
+        isOpen={isWinnerModalOpen}
+        winnerProject={winnerProject}
+        userVotedForWinner={userVotedForWinner}
       />
     </div>
   );

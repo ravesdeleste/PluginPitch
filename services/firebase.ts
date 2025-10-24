@@ -2,6 +2,7 @@
 import { initializeApp } from "firebase/app";
 import { getFirestore } from "firebase/firestore";
 import { getAuth } from "firebase/auth";
+import { getFunctions } from "firebase/functions";
 
 // Firebase configuration from environment variables
 const firebaseConfig = {
@@ -23,5 +24,6 @@ if (!firebaseConfig.apiKey || !firebaseConfig.projectId) {
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 const auth = getAuth(app);
+const functions = getFunctions(app);
 
-export { db, app, auth };
+export { db, app, auth, functions };

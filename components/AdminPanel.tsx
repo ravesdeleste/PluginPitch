@@ -27,14 +27,17 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ projects, onSignOut }) => {
     setIsAuthorized(true);
   }, [onSignOut]);
 
+  // Only load votes if authorized
   useEffect(() => {
+    if (!isAuthorized) return;
+
     const votesQuery = collection(db, 'votes');
     const unsubscribe = onSnapshot(votesQuery, (snapshot) => {
-        const votesData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Vote));
-        setVotes(votesData);
+      const votesData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Vote));
+      setVotes(votesData);
     });
     return () => unsubscribe();
-  }, []);
+  }, [isAuthorized]);
 
   const voteResults = useMemo(() => {
     const counts = new Map<string, number>();
