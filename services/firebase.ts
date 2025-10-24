@@ -1,22 +1,27 @@
-// Fix: Use the Firebase compat library for initialization to resolve an import error
-// that can occur when a v8-style Firebase package is used with v9 modular syntax.
-import firebase from "firebase/compat/app";
-import "firebase/compat/firestore";
+// Use modular Firebase SDK with environment variables for credentials
+import { initializeApp } from "firebase/app";
 import { getFirestore } from "firebase/firestore";
+import { getAuth } from "firebase/auth";
 
-// Your web app's Firebase configuration
+// Firebase configuration from environment variables
 const firebaseConfig = {
-  apiKey: "AIzaSyDmq6_coo5kDOi-wbkpSgcnDAR8EWoDSgw",
-  authDomain: "plugin-pitch.firebaseapp.com",
-  projectId: "plugin-pitch",
-  storageBucket: "plugin-pitch.firebasestorage.app",
-  messagingSenderId: "948231875593",
-  appId: "1:948231875593:web:c11df88844bdfc603fdcd8",
-  measurementId: "G-43MS246S6M"
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+  appId: import.meta.env.VITE_FIREBASE_APP_ID,
+  measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID
 };
 
-// Initialize Firebase using the compat API
-const app = firebase.initializeApp(firebaseConfig);
-const db = getFirestore(app);
+// Validate that required Firebase config is present
+if (!firebaseConfig.apiKey || !firebaseConfig.projectId) {
+  throw new Error("Firebase configuration is missing. Please check your .env file.");
+}
 
-export { db };
+// Initialize Firebase
+const app = initializeApp(firebaseConfig);
+const db = getFirestore(app);
+const auth = getAuth(app);
+
+export { db, app, auth };

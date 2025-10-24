@@ -11,11 +11,21 @@ import Spinner from './components/Spinner';
 import WinnerModal from './components/WinnerModal';
 import ThankYouScreen from './components/ThankYouScreen';
 import WelcomeScreen from './components/WelcomeScreen';
+import {
+  getCurrentSession,
+  getCurrentAdminSession,
+  clearSession,
+  clearAdminSession,
+  getStoredVoteInfo,
+  verifyEmailLink,
+} from './services/sessionManager';
+import EmailVerificationScreen from './components/EmailVerificationScreen';
 
 enum AppState {
   LOADING,
   WELCOME,
   REGISTRATION,
+  AWAITING_EMAIL_VERIFICATION,
   VOTING,
   VOTED,
   ADMIN_LOGIN,
@@ -23,13 +33,10 @@ enum AppState {
   THANK_YOU,
 }
 
-const getLocalUserId = (): string => {
-  let userId = localStorage.getItem('localUserId');
-  if (!userId) {
-    userId = `user_${Date.now().toString(36)}_${Math.random().toString(36).substring(2)}`;
-    localStorage.setItem('localUserId', userId);
-  }
-  return userId;
+// Get userId from secure session storage
+const getUserIdFromSession = (): string | null => {
+  const session = getCurrentSession();
+  return session ? session.userId : null;
 };
 
 const App: React.FC = () => {
@@ -38,40 +45,60 @@ const App: React.FC = () => {
   const [userVoteInfo, setUserVoteInfo] = useState<UserVoteInfo | null>(null);
   const [winnerData, setWinnerData] = useState<Winner | null>(null);
   const [isWinnerModalOpen, setIsWinnerModalOpen] = useState(false);
+  const [pendingVerificationEmail, setPendingVerificationEmail] = useState<string | null>(null);
 
 
   useEffect(() => {
     const checkUserStatus = async () => {
-      const userId = getLocalUserId();
-      
-      if (localStorage.getItem('isAdmin') === 'true') {
+      // Check if user is verifying email from link
+      const params = new URLSearchParams(window.location.search);
+      if (params.get('mode') === 'verifyEmail') {
+        try {
+          const result = await verifyEmailLink();
+          if (result.success && result.sessionData) {
+            // Email verified successfully, proceed to voting
+            setUserVoteInfo({ projectId: '', isJury: result.sessionData.isJury });
+            setAppState(AppState.VOTING);
+            return;
+          } else {
+            // Verification failed, show error and go back to registration
+            alert(result.message);
+            setAppState(AppState.WELCOME);
+            return;
+          }
+        } catch (error) {
+          console.error('Error verifying email:', error);
+          alert('Error al verificar tu email. Por favor intenta de nuevo.');
+          setAppState(AppState.WELCOME);
+          return;
+        }
+      }
+
+      // Check if admin is logged in
+      const adminSession = getCurrentAdminSession();
+      if (adminSession) {
         setAppState(AppState.ADMIN_PANEL);
         return;
       }
 
-      const storedVoteInfo = localStorage.getItem(`voteInfo-${userId}`);
-      if (storedVoteInfo) {
-        setUserVoteInfo(JSON.parse(storedVoteInfo));
-        setAppState(AppState.VOTED);
+      // Check if regular user has active session
+      const userSession = getCurrentSession();
+      if (userSession) {
+        // Try to find stored vote info
+        const storedVote = await getStoredVoteInfo(userSession.userEmail);
+        if (storedVote) {
+          setUserVoteInfo(storedVote);
+          setAppState(AppState.VOTED);
+          return;
+        }
+
+        // User has session but no vote yet
+        setAppState(AppState.VOTING);
         return;
       }
 
-      try {
-        const votesQuery = query(collection(db, 'votes'), where('userId', '==', userId));
-        const querySnapshot = await getDocs(votesQuery);
-        if (!querySnapshot.empty) {
-          const voteDoc = querySnapshot.docs[0].data();
-          const info = { projectId: voteDoc.projectId, isJury: voteDoc.weight === 2 };
-          localStorage.setItem(`voteInfo-${userId}`, JSON.stringify(info));
-          setUserVoteInfo(info);
-          setAppState(AppState.VOTED);
-        } else {
-          setAppState(AppState.WELCOME);
-        }
-      } catch (error) {
-          console.error("Error checking user status in Firestore:", error);
-          setAppState(AppState.WELCOME);
-      }
+      // No active session, show welcome screen
+      setAppState(AppState.WELCOME);
     };
 
     checkUserStatus();
@@ -114,25 +141,43 @@ const App: React.FC = () => {
   }, [appState]);
 
 
-  const handleRegister = (isJury: boolean) => {
+  const handleEmailSent = (email: string, userName: string, isJury: boolean) => {
+    // Email verification link has been sent
+    setPendingVerificationEmail(email);
     setUserVoteInfo({ projectId: '', isJury });
-    setAppState(AppState.VOTING);
+    setAppState(AppState.AWAITING_EMAIL_VERIFICATION);
+  };
+
+  const handleResendVerificationEmail = async () => {
+    if (pendingVerificationEmail && userVoteInfo) {
+      const { sendEmailVerificationLink } = await import('./services/sessionManager');
+      const result = await sendEmailVerificationLink(
+        pendingVerificationEmail,
+        'Usuario', // name no disponible aquí, pero no es crítico
+        userVoteInfo.isJury
+      );
+      if (result.success) {
+        alert('Email reenviado. Por favor revisa tu bandeja de entrada.');
+      } else {
+        alert(result.message);
+      }
+    }
   };
 
   const handleVote = async (projectId: string) => {
-    if (userVoteInfo) {
+    const userSession = getCurrentSession();
+    if (userVoteInfo && userSession) {
       setAppState(AppState.LOADING);
       try {
-        const userId = getLocalUserId();
         const voteData = {
           projectId,
-          userId: userId,
-          weight: userVoteInfo.isJury ? 2 : 1,
+          userId: userSession.userId,
+          userEmail: userSession.userEmail,
+          weight: userSession.weight,
           timestamp: Timestamp.now(),
         };
         await addDoc(collection(db, 'votes'), voteData);
         const newVoteInfo = { ...userVoteInfo, projectId };
-        localStorage.setItem(`voteInfo-${userId}`, JSON.stringify(newVoteInfo));
         setUserVoteInfo(newVoteInfo);
         setAppState(AppState.THANK_YOU);
       } catch(error) {
@@ -144,25 +189,32 @@ const App: React.FC = () => {
   };
 
   const handleAdminLogin = () => {
-    localStorage.setItem('isAdmin', 'true');
+    // Admin session is created in AdminLogin component via validateAdminCredentials
     setAppState(AppState.ADMIN_PANEL);
   };
-  
+
   const handleAdminSignOut = () => {
-    localStorage.removeItem('isAdmin');
+    clearAdminSession();
     setAppState(AppState.WELCOME);
   };
 
   const renderContent = () => {
     const votedProject = projects.find(p => p.id === userVoteInfo?.projectId);
-    
+
     switch (appState) {
       case AppState.LOADING:
         return <Spinner />;
       case AppState.WELCOME:
         return <WelcomeScreen onVoteClick={() => setAppState(AppState.REGISTRATION)} />;
       case AppState.REGISTRATION:
-        return <RegistrationForm onRegister={handleRegister} />;
+        return <RegistrationForm onEmailSent={handleEmailSent} />;
+      case AppState.AWAITING_EMAIL_VERIFICATION:
+        return (
+          <EmailVerificationScreen
+            userEmail={pendingVerificationEmail || ''}
+            onResend={handleResendVerificationEmail}
+          />
+        );
       case AppState.VOTING:
         return <VotingScreen projects={projects} onVote={handleVote} isLoading={projects.length === 0} />;
       case AppState.THANK_YOU:

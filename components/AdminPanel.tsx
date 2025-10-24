@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { Project, Vote } from '../types';
 import { db } from '../services/firebase';
 import { collection, onSnapshot, addDoc, doc, updateDoc, deleteDoc, setDoc, Timestamp } from 'firebase/firestore';
+import { getCurrentAdminSession } from '../services/sessionManager';
 
 interface AdminPanelProps {
   projects: Project[];
@@ -14,6 +15,17 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ projects, onSignOut }) => {
   const [editingProject, setEditingProject] = useState<Project | null>(null);
   const [winnerId, setWinnerId] = useState('');
   const [votes, setVotes] = useState<Vote[]>([]);
+  const [isAuthorized, setIsAuthorized] = useState(false);
+
+  // Verify admin session on component mount
+  useEffect(() => {
+    const adminSession = getCurrentAdminSession();
+    if (!adminSession) {
+      onSignOut(); // Redirect to welcome if no valid session
+      return;
+    }
+    setIsAuthorized(true);
+  }, [onSignOut]);
 
   useEffect(() => {
     const votesQuery = collection(db, 'votes');
@@ -81,6 +93,14 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ projects, onSignOut }) => {
         alert('Por favor, selecciona un proyecto ganador.')
     }
   };
+
+  if (!isAuthorized) {
+    return (
+      <div className="w-full max-w-4xl mx-auto p-6 bg-slate-800 text-white rounded-xl shadow-lg">
+        <p className="text-center text-yellow-400">Verificando permisos de administrador...</p>
+      </div>
+    );
+  }
 
   return (
     <div className="w-full max-w-4xl mx-auto p-6 bg-slate-800 text-white rounded-xl shadow-lg">

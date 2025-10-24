@@ -1,26 +1,38 @@
 
 import React, { useState } from 'react';
-import { JURY_CODE } from '../constants';
+import { sendEmailVerificationLink } from '../services/sessionManager';
 
 interface RegistrationFormProps {
-  onRegister: (isJury: boolean) => void;
+  onEmailSent: (email: string, userName: string, isJury: boolean) => void;
 }
 
-const RegistrationForm: React.FC<RegistrationFormProps> = ({ onRegister }) => {
+const RegistrationForm: React.FC<RegistrationFormProps> = ({ onEmailSent }) => {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [juryCode, setJuryCode] = useState('');
   const [error, setError] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!name || !email) {
       setError('Nombre y Correo son requeridos.');
       return;
     }
+
+    setIsLoading(true);
     setError('');
-    const isJury = juryCode.trim() === JURY_CODE;
-    onRegister(isJury);
+
+    const isJury = juryCode.trim() === import.meta.env.VITE_JURY_CODE;
+    const result = await sendEmailVerificationLink(email, name, isJury);
+
+    if (result.success) {
+      onEmailSent(email, name, isJury);
+    } else {
+      setError(result.message);
+    }
+
+    setIsLoading(false);
   };
 
   return (
@@ -75,9 +87,10 @@ const RegistrationForm: React.FC<RegistrationFormProps> = ({ onRegister }) => {
         <div>
           <button
             type="submit"
-            className="w-full flex justify-center py-3 px-4 border border-transparent rounded-md shadow-sm text-sm font-bold text-slate-900 bg-yellow-400 hover:bg-yellow-500 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-yellow-500 focus:ring-offset-slate-800 transition-transform duration-200 hover:scale-105"
+            disabled={isLoading}
+            className="w-full flex justify-center py-3 px-4 border border-transparent rounded-md shadow-sm text-sm font-bold text-slate-900 bg-yellow-400 hover:bg-yellow-500 disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-yellow-500 focus:ring-offset-slate-800 transition-transform duration-200 hover:scale-105"
           >
-            Ingresar y Votar
+            {isLoading ? 'Validando datos...' : 'Ingresar y Votar'}
           </button>
         </div>
       </form>
